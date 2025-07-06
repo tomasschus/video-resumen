@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-multipart
+openai
+python-dotenv
+PyPDF2
+aiohttp
+reportlab
+requests
+gTTS
+pydub
+moviepy
+Pillow
+python-telegram-bot 

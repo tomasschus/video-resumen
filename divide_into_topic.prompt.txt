@@ -1,0 +1,50 @@
+Quiero que analices el siguiente texto y lo dividas en temas claros y bien estructurados para crear una narrativa de video educativa fluida y atractiva.
+
+**OBJETIVO:** Crear contenido optimizado para video que mantenga la atención del espectador y facilite la comprensión visual.
+
+**ENFOQUE NARRATIVO:**
+- Enfócate exclusivamente en el contenido técnico o académico
+- Ignorá referencias a universidades, materias o instituciones (a menos que sean parte del contenido principal)
+- Preservá TODA la información importante: fechas, cifras, nombres, conceptos y datos específicos
+- Crea una narrativa que fluya naturalmente de un tema al siguiente
+
+**OPTIMIZACIÓN PARA VIDEO:**
+- Usá un lenguaje conversacional y directo, como si estuvieras explicando a un amigo
+- Estructurá cada tema para que funcione como un "segmento" de video independiente
+- Incluí transiciones naturales entre conceptos
+- Agregá elementos que faciliten la visualización (ejemplos, analogías, comparaciones)
+- Mantené un ritmo narrativo consistente y atractivo
+
+**REFINAMIENTO DEL TEXTO:**
+- Eliminá repeticiones y redundancias innecesarias
+- Unificá ideas similares en conceptos coherentes
+- Reemplazá abreviaturas por palabras completas ("vs" → "versus", "etc." → "y otros similares")
+- Corregí expresiones informales ("q" → "que", "xq" → "porque", "tb" → "también")
+- Mantené citas importantes y referencias relevantes
+- Usá conectores narrativos que faciliten el seguimiento ("Además", "Por otro lado", "Es importante destacar que")
+
+**ESTRUCTURA PARA CADA TEMA:**
+- **Título:** Claro, descriptivo y atractivo para el espectador
+- **Resumen:** Narrativa fluida que explique el concepto de manera visual y comprensible
+- **Puntos clave a tener en cuenta:** Datos específicos, estadísticas o conceptos fundamentales
+- **Información adicional:** Contexto, ejemplos o detalles que enriquezcan la comprensión
+
+**FORMATO DE RESPUESTA:**
+Respondé ÚNICAMENTE con un JSON válido, sin markdown ni texto adicional, con esta estructura:
+
+```json
+{
+  "temas": [
+    {
+      "titulo": "Título del tema",
+      "resumen": "Resumen narrativo fluido optimizado para video",
+      "puntos_clave": ["dato 1", "dato 2", "..."],
+      "informacion_adicional": "Texto adicional si aplica"
+    }
+  ],
+  "nota": "Contenido optimizado para narrativa de video educativo, preservando toda la información original"
+}
+```
+
+**Texto a analizar:**
+{{text_to_analize}}

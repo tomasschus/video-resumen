@@ -1,0 +1,5 @@
+generados*
+user_data/
+venv/
+.env
+.DS_Store
