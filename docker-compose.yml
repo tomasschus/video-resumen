@@ -1,0 +1,103 @@
+services:
+  # Bot de Telegram para resumen de PDFs
+  pdf-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdf-resume-bot
+    restart: unless-stopped
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - ./ffmpeg_bin:/app/ffmpeg_bin
+    networks:
+      - pdf-bot-network
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis para caché y manejo de sesiones (opcional pero recomendado)
+  redis:
+    image: redis:7-alpine
+    container_name: pdf-bot-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - pdf-bot-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Servicio web para estadísticas (opcional)
+  # web-stats:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.web
+  #   container_name: pdf-bot-web
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     - PYTHONUNBUFFERED=1
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./logs:/app/logs
+  #   networks:
+  #     - pdf-bot-network
+  #   depends_on:
+  #     - pdf-bot
+  #   profiles:
+  #     - web
+
+  # Servicio para limpieza automática de archivos temporales
+  cleanup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdf-bot-cleanup
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+    networks:
+      - pdf-bot-network
+    command: python cleanup_service.py
+    profiles:
+      - cleanup
+
+networks:
+  pdf-bot-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local
+
+# Configuración adicional para desarrollo
+x-common-variables: &common-variables
+  PYTHONPATH: /app
+  TZ: America/Argentina/Buenos_Aires
+
+# Para desarrollo, uncomment las siguientes líneas:
+# x-development: &development
+#   volumes:
+#     - .:/app
+#   environment:
+#     <<: *common-variables
+#     DEBUG: "true"

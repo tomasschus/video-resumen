@@ -1,0 +1,58 @@
+# docker-compose.override.yml
+# Este archivo se aplica automáticamente en desarrollo
+# Sobrescribe configuraciones para facilitar el desarrollo local
+
+version: '3.8'
+
+services:
+  pdf-bot:
+    # Montar el código local para desarrollo
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - ./ffmpeg_bin:/app/ffmpeg_bin
+    environment:
+      - DEBUG=true
+      - PYTHONUNBUFFERED=1
+    # Comando para desarrollo con recarga automática
+    command: python bot.py
+    # Deshabilitar healthcheck en desarrollo
+    healthcheck:
+      disable: true
+
+  web-stats:
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DEBUG=true
+      - RELOAD=true
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+    healthcheck:
+      disable: true
+
+  cleanup:
+    volumes:
+      - .:/app
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+    environment:
+      - DEBUG=true
+    healthcheck:
+      disable: true
+
+  # Servicio adicional para desarrollo: logs viewer
+  logs:
+    image: amir20/dozzle:latest
+    container_name: pdf-bot-logs
+    ports:
+      - "9999:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - pdf-bot-network
+    profiles:
+      - dev

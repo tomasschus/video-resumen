@@ -3,9 +3,10 @@
 Script para mostrar estadísticas del bot y exportar datos de usuarios.
 """
 
-import os
 import json
 from datetime import datetime
+from typing import Optional
+
 from user_manager import UserManager
 
 
@@ -31,17 +32,27 @@ def show_bot_stats():
 
     print(f"\n🏆 **Usuarios Más Activos:**")
     users = list(manager.users.values())
-    users.sort(key=lambda x: x.total_activities, reverse=True)
+    
+    # Calcular total_activities para cada usuario
+    user_activities = {}
+    for activity in manager.activities:
+        user_id = activity.user_id
+        user_activities[user_id] = user_activities.get(user_id, 0) + 1
+    
+    # Ordenar usuarios por número de actividades
+    users.sort(key=lambda x: user_activities.get(x.user_id, 0), reverse=True)
 
     for i, user in enumerate(users[:5], 1):
+        user_activity_count = user_activities.get(user.user_id, 0)
         print(f"{i}. {user.first_name or 'Usuario'} {user.last_name or ''} "
               f"(@{user.username or 'sin_username'})")
         print(f"   📁 Archivos: {user.total_files_processed} | "
               f"🎯 Generaciones: {user.total_generations} | "
+              f"📈 Actividades: {user_activity_count} | "
               f"📅 Última actividad: {user.last_activity[:10] if user.last_activity else 'N/A'}")
 
 
-def export_user_data(user_id: int = None):
+def export_user_data(user_id: Optional[int] = None):
     """Exporta datos de un usuario específico o todos los usuarios."""
     manager = UserManager()
 

@@ -1,10 +1,12 @@
-import openai
-import json
 import asyncio
-import aiohttp
+import json
 import os
-from datetime import datetime
 import uuid
+from datetime import datetime
+from typing import Optional
+
+import aiohttp
+import openai
 
 
 def create_work_directory() -> str:
@@ -22,13 +24,19 @@ def create_work_directory() -> str:
 
 def generate_image_with_openai(prompt: str) -> str:
     """Genera una imagen usando la API de OpenAI a partir de un prompt y devuelve la URL de la imagen."""
-    response = openai.images.generate(
-        model="dall-e-3",
-        prompt=prompt,
-        n=1,
-        size="1024x1024"
-    )
-    return response.data[0].url
+    try:
+        response = openai.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            n=1,
+            size="1024x1024"
+        )
+        if response and response.data and len(response.data) > 0 and response.data[0].url:
+            return response.data[0].url
+        else:
+            return "Error: No se pudo generar la imagen"
+    except Exception as e:
+        return f"Error al generar imagen: {str(e)}"
 
 
 async def generate_image_async(session, prompt: str) -> str:
@@ -40,14 +48,18 @@ async def generate_image_async(session, prompt: str) -> str:
             n=1,
             size="1024x1024"
         )
-        return response.data[0].url
+        if response and response.data and len(response.data) > 0 and response.data[0].url:
+            return response.data[0].url
+        else:
+            return "Error: No se pudo generar la imagen"
     except Exception as e:
         return f"Error al generar imagen: {str(e)}"
 
 
-async def divide_into_topics(text: str) -> dict:
+async def divide_into_topics(text: str, work_directory: Optional[str] = None) -> dict:
     """Usa ChatGPT para dividir el texto en temas organizados y devuelve un objeto JSON."""
-
+    response = None
+    
     try:
         try:
             with open('divide_into_topic.prompt.txt', 'r', encoding='utf-8') as file:
@@ -61,7 +73,9 @@ async def divide_into_topics(text: str) -> dict:
                 "error": f"Error al leer el archivo de prompt: {str(e)}"
             }
 
-        work_directory = create_work_directory()
+        # Usar directorio proporcionado o crear uno nuevo
+        if not work_directory:
+            work_directory = create_work_directory()
 
         prompt = prompt_template.replace("{{text_to_analize}}", text)
 
@@ -77,7 +91,11 @@ async def divide_into_topics(text: str) -> dict:
             max_tokens=3000
         )
 
-        response_text = response.choices[0].message.content.strip()
+        response_text = response.choices[0].message.content
+        if response_text:
+            response_text = response_text.strip()
+        else:
+            return {"error": "No se recibió respuesta del modelo de IA"}
 
         if response_text.startswith("```json"):
             response_text = response_text.replace(
@@ -122,15 +140,16 @@ async def divide_into_topics(text: str) -> dict:
                     topic["imagen_url"] = f"Error al generar imagen: {str(image_urls[i])}"
                 else:
                     topic["imagen_url"] = image_urls[i]
-
+        
         return topics_json
 
     except json.JSONDecodeError as e:
         return {
             "error": f"Error al parsear JSON de ChatGPT: {str(e)}",
-            "respuesta_raw": response.choices[0].message.content if 'response' in locals() else "No hay respuesta"
+            "respuesta_raw": response.choices[0].message.content if response and response.choices else "No hay respuesta"
         }
     except Exception as e:
         return {
             "error": f"Error al procesar con ChatGPT: {str(e)}"
         }
+

@@ -1,19 +1,24 @@
-import PyPDF2
 import io
-import requests
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.lib import colors
-from gtts import gTTS
-from pydub import AudioSegment
 import os
-from moviepy.editor import VideoFileClip, AudioFileClip, ImageClip, CompositeVideoClip, concatenate_videoclips
-from PIL import Image as PILImage
+import shutil
 import tempfile
 import uuid
 from datetime import datetime
+from typing import Optional
+
+import PyPDF2
+import requests
+from gtts import gTTS
+from moviepy.editor import (AudioFileClip, CompositeVideoClip, ImageClip,
+                            VideoFileClip, concatenate_videoclips)
+from PIL import Image as PILImage
+from pydub import AudioSegment
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import (Image, PageBreak, Paragraph, SimpleDocTemplate,
+                                Spacer)
 
 os.environ["IMAGEIO_FFMPEG_EXE"] = os.path.join(
     os.path.dirname(__file__), "ffmpeg_bin", "ffmpeg")
@@ -22,10 +27,9 @@ os.environ["IMAGEIO_FFMPEG_EXE"] = os.path.join(
 ffmpeg_path = os.path.join(os.path.dirname(__file__), "ffmpeg_bin", "ffmpeg")
 AudioSegment.converter = ffmpeg_path
 AudioSegment.ffmpeg = ffmpeg_path
-AudioSegment.ffprobe = ffmpeg_path
 
 
-def extract_pdf_text(content: bytes) -> str:
+def extract_pdf_text(content: bytes, work_directory: Optional[str] = None) -> str:
     """Extrae el texto de un archivo PDF a partir de su contenido en bytes."""
     try:
         pdf_file = io.BytesIO(content)
@@ -50,7 +54,9 @@ def extract_pdf_text(content: bytes) -> str:
 
         extracted_text = text.strip()
 
-        work_directory = create_work_directory()
+        # Usar directorio proporcionado o crear uno nuevo
+        if not work_directory:
+            work_directory = create_work_directory()
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         raw_text_filename = os.path.join(
@@ -128,10 +134,10 @@ def download_image(url: str, filename: str) -> str:
             return filename
         else:
             print(f"❌ Error al descargar imagen: {response.status_code}")
-            return None
+            return ""
     except Exception as e:
         print(f"❌ Error al descargar imagen: {str(e)}")
-        return None
+        return ""
 
 
 def create_topic_video(image_path: str, audio_path: str, title: str, output_path: str) -> str:
@@ -156,7 +162,7 @@ def create_topic_video(image_path: str, audio_path: str, title: str, output_path
         return f"Error al crear video del tema: {str(e)}"
 
 
-def generate_complete_video(topics: list, base_filename: str = "video_tema", send_percentage=None) -> str:
+def generate_complete_video(topics: list, base_filename: str = "video_tema", send_percentage=None, work_directory: Optional[str] = None) -> str:
     """Genera un video completo combinando todos los temas."""
     try:
         print(f"🎬 Iniciando generación de video completo")
@@ -165,7 +171,9 @@ def generate_complete_video(topics: list, base_filename: str = "video_tema", sen
         if send_percentage:
             send_percentage(0)
 
-        work_directory = create_work_directory()
+        # Usar directorio proporcionado o crear uno nuevo
+        if not work_directory:
+            work_directory = create_work_directory()
 
         total_steps = len(topics) * 2 + 1
         current_step = 0
@@ -239,6 +247,7 @@ def generate_complete_video(topics: list, base_filename: str = "video_tema", sen
         if send_percentage:
             send_percentage(100)  # 100% - Completado
 
+         
         return video_output
 
     except Exception as e:
@@ -246,6 +255,8 @@ def generate_complete_video(topics: list, base_filename: str = "video_tema", sen
         print(error_msg)
         if send_percentage:
             send_percentage(-1)  # -1 indica error
+        
+        # En caso de error, no limpiar el directorio para preservar archivos para depuración
         return error_msg
 
 
@@ -264,7 +275,7 @@ def create_work_directory() -> str:
     return directory
 
 
-def generate_audio_summary(title: str, topics: list, filename: str = "resumen_audio.mp3") -> str:
+def generate_audio_summary(title: str, topics: list, filename: str = "resumen_audio.mp3", work_directory: Optional[str] = None) -> str:
     """
     Genera un archivo de audio con el resumen completo de todos los temas.
     """
@@ -272,8 +283,9 @@ def generate_audio_summary(title: str, topics: list, filename: str = "resumen_au
         print(f"🔊 Iniciando generación de audio resumen")
         print(f"📊 Total de temas a procesar: {len(topics)}")
 
-        # Crear directorio de trabajo
-        work_directory = create_work_directory()
+        # Usar directorio proporcionado o crear uno nuevo
+        if not work_directory:
+            work_directory = create_work_directory()
         filename = os.path.join(work_directory, filename)
 
         # Crear texto completo para el audio
@@ -311,14 +323,14 @@ def generate_audio_summary(title: str, topics: list, filename: str = "resumen_au
             2.5  # Estimación aproximada
         print(
             f"✅ Audio generado: {filename} ({file_size} bytes, ~{duration_estimate:.1f}s)")
-
+         
         return filename
 
-    except Exception as e:
+    except Exception as e: 
         return f"Error al generar audio resumen: {str(e)}"
 
 
-def generate_audio_by_topic(topics: list, base_filename: str = "tema") -> list:
+def generate_audio_by_topic(topics: list, base_filename: str = "tema", work_directory: Optional[str] = None) -> list:
     """
     Genera archivos de audio separados para cada tema.
     """
@@ -327,8 +339,9 @@ def generate_audio_by_topic(topics: list, base_filename: str = "tema") -> list:
         print(f"📊 Total de temas a procesar: {len(topics)}")
         print(f"📁 Base filename: {base_filename}")
 
-        # Crear directorio de trabajo
-        work_directory = create_work_directory()
+        # Usar directorio proporcionado o crear uno nuevo
+        if not work_directory:
+            work_directory = create_work_directory()
 
         audio_files = []
 
@@ -401,19 +414,23 @@ def generate_audio_by_topic(topics: list, base_filename: str = "tema") -> list:
 
         print(
             f"🎉 Proceso completado. Total de archivos generados: {len(audio_files)}")
+        
+          
         return audio_files
 
     except Exception as e:
+        
         return [{'error': f"Error al generar audios por tema: {str(e)}"}]
 
 
-def generate_pdf_summary(title: str, topics: list, filename: str = "resumen.pdf") -> str:
+def generate_pdf_summary(title: str, topics: list, filename: str = "resumen.pdf", work_directory: Optional[str] = None) -> str:
     """
     Genera un PDF con la estructura: Título, tema, imagen, contenido para cada tema.
     """
     try:
-        # Crear directorio de trabajo
-        work_directory = create_work_directory()
+        # Usar directorio proporcionado o crear uno nuevo
+        if not work_directory:
+            work_directory = create_work_directory()
         filename = os.path.join(work_directory, filename)
 
         doc = SimpleDocTemplate(filename, pagesize=A4)
@@ -500,7 +517,22 @@ def generate_pdf_summary(title: str, topics: list, filename: str = "resumen.pdf"
 
         # Construir el PDF
         doc.build(story)
+         
         return filename
 
     except Exception as e:
         return f"Error al generar PDF: {str(e)}"
+
+
+def clean_working_directory(directory: str) -> None:
+    """
+    Elimina el directorio de trabajo y todos sus contenidos.
+    """
+    try:
+        if os.path.exists(directory):
+            shutil.rmtree(directory)
+            print(f"🧹 Directorio de trabajo eliminado: {directory}")
+        else:
+            print(f"⚠️  Directorio no encontrado: {directory}")
+    except Exception as e:
+        print(f"❌ Error al eliminar directorio de trabajo: {str(e)}")

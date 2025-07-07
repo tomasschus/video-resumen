@@ -1,13 +1,20 @@
-import os
 import asyncio
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-from dotenv import load_dotenv
+import os
+from typing import Any, Dict, Optional
+
 import openai
-from utils import extract_pdf_text, generate_pdf_summary, generate_audio_summary, generate_audio_by_topic, generate_complete_video
-from utils_ai import generate_image_with_openai, divide_into_topics
+from dotenv import load_dotenv
+from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, Message,
+                      Update)
+from telegram.ext import (Application, CallbackQueryHandler, CommandHandler,
+                          ContextTypes, MessageHandler, filters)
+
 from user_manager import UserManager
+from utils import (create_work_directory, extract_pdf_text,
+                   generate_audio_by_topic, generate_audio_summary,
+                   generate_complete_video, generate_pdf_summary)
+from utils_ai import divide_into_topics, generate_image_with_openai
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -45,22 +52,26 @@ def escape_markdown(text: str) -> str:
 
 class UserState:
     def __init__(self):
-        self.pdf_content = None
-        self.filename = None
-        self.extracted_text = None
-        self.organized_topics = None
+        self.pdf_content: Optional[bytes] = None
+        self.filename: Optional[str] = None
+        self.extracted_text: Optional[str] = None
+        self.organized_topics: Optional[Dict[str, Any]] = None
+        self.work_directory: Optional[str] = None  # Directorio compartido para toda la sesión
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Comando /start - Mensaje de bienvenida"""
     user = update.effective_user
+    
+    if not user or not update.message:
+        return
 
     user_info = user_manager.register_user(
         user_id=user.id,
-        username=user.username,
-        first_name=user.first_name,
-        last_name=user.last_name,
-        language_code=user.language_code,
+        username=user.username or "",
+        first_name=user.first_name or "",
+        last_name=user.last_name or "",
+        language_code=user.language_code or "es",
         is_bot=user.is_bot
     )
 
@@ -98,6 +109,9 @@ Este bot puede procesar archivos PDF y generar:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Comando /help - Mostrar ayuda"""
+    if not update.message:
+        return
+        
     help_message = """
 📚 **Ayuda del Bot**
 
@@ -126,6 +140,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Comando /status - Ver estado del procesamiento"""
+    if not update.effective_user or not update.message:
+        return
+        
     user_id = update.effective_user.id
 
     user_manager.log_activity(
@@ -153,6 +170,9 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Comando /stats - Ver estadísticas del usuario"""
+    if not update.effective_user or not update.message:
+        return
+        
     user_id = update.effective_user.id
 
     user_manager.log_activity(
@@ -204,19 +224,22 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Maneja archivos PDF enviados por el usuario"""
+    if not update.effective_user or not update.message:
+        return
+        
     user_id = update.effective_user.id
     user = update.effective_user
 
     user_manager.register_user(
         user_id=user.id,
-        username=user.username,
-        first_name=user.first_name,
-        last_name=user.last_name,
-        language_code=user.language_code,
+        username=user.username or "",
+        first_name=user.first_name or "",
+        last_name=user.last_name or "",
+        language_code=user.language_code or "es",
         is_bot=user.is_bot
     )
 
-    if not update.message.document or not update.message.document.file_name.lower().endswith('.pdf'):
+    if not update.message.document or not update.message.document.file_name or not update.message.document.file_name.lower().endswith('.pdf'):
         await update.message.reply_text("❌ Por favor, envía un archivo PDF válido.")
         user_manager.log_activity(
             user_id=user_id,
@@ -226,14 +249,14 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
-    if update.message.document.file_size > 20 * 1024 * 1024:
+    if update.message.document.file_size and update.message.document.file_size > 20 * 1024 * 1024:
         await update.message.reply_text("❌ El archivo es demasiado grande. Máximo 20MB permitido.")
         user_manager.log_activity(
             user_id=user_id,
             action="file_too_large",
             success=False,
             error_message="Archivo excede 20MB",
-            file_processed=update.message.document.file_name
+            file_processed=update.message.document.file_name or "unknown"
         )
         return
 
@@ -246,25 +269,28 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         user_states[user_id] = UserState()
         user_states[user_id].pdf_content = file_content
         user_states[user_id].filename = update.message.document.file_name
+        # Crear directorio de trabajo único para esta sesión
+        user_states[user_id].work_directory = create_work_directory()
+        print(f"📁 Directorio de trabajo creado para usuario {user_id}: {user_states[user_id].work_directory}")
 
         user_manager.start_session(
             user_id=user_id,
-            filename=update.message.document.file_name,
-            file_size=update.message.document.file_size
+            filename=update.message.document.file_name or "unknown.pdf",
+            file_size=update.message.document.file_size or 0
         )
 
         user_manager.log_activity(
             user_id=user_id,
             action="file_uploaded",
-            file_processed=update.message.document.file_name,
+            file_processed=update.message.document.file_name or "unknown.pdf",
             details={
-                "file_size": update.message.document.file_size,
+                "file_size": update.message.document.file_size or 0,
                 "file_id": update.message.document.file_id
             }
         )
 
         await processing_msg.edit_text("📖 Extrayendo texto del PDF...")
-        extracted_text = extract_pdf_text(file_content)
+        extracted_text = extract_pdf_text(file_content, user_states[user_id].work_directory)
 
         if extracted_text.startswith("Error"):
             await processing_msg.edit_text(f"❌ Error al extraer texto: {extracted_text}")
@@ -294,12 +320,15 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             action="pdf_processing_error",
             success=False,
             error_message=str(e),
-            file_processed=update.message.document.file_name if update.message.document else None
+            file_processed=update.message.document.file_name if update.message.document and update.message.document.file_name else "unknown"
         )
 
 
 async def show_generation_options(update: Update, context: ContextTypes.DEFAULT_TYPE, message: Message) -> None:
     """Muestra las opciones de generación disponibles"""
+    if not update.effective_user:
+        return
+        
     keyboard = [
         [
             InlineKeyboardButton(
@@ -316,10 +345,13 @@ async def show_generation_options(update: Update, context: ContextTypes.DEFAULT_
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    user_state = user_states.get(update.effective_user.id)
+    extracted_text_length = len(user_state.extracted_text) if user_state and user_state.extracted_text else 0
 
     await message.edit_text(
         "✅ **PDF procesado exitosamente!**\n\n"
-        f"📝 Texto extraído: {len(user_states[update.effective_user.id].extracted_text)} caracteres\n\n"
+        f"📝 Texto extraído: {extracted_text_length} caracteres\n\n"
         "**¿Qué tipo de resumen quieres generar?**\n\n"
         "💡 *Nota: El procesamiento con IA se realizará cuando elijas una opción*",
         reply_markup=reply_markup,
@@ -330,6 +362,9 @@ async def show_generation_options(update: Update, context: ContextTypes.DEFAULT_
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Maneja los callbacks de los botones inline"""
     query = update.callback_query
+    if not query or not update.effective_user:
+        return
+        
     await query.answer()
 
     user_id = update.effective_user.id
@@ -344,27 +379,35 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     processing_msg = await query.edit_message_text("🔄 Generando archivo... Esto puede tomar varios minutos.")
 
     try:
-        if query.data == "generate_pdf":
+        if query.data == "generate_pdf" and isinstance(processing_msg, Message):
             await generate_pdf_for_user(update, context, processing_msg, state)
-        elif query.data == "generate_audio":
+        elif query.data == "generate_audio" and isinstance(processing_msg, Message):
             await generate_audio_for_user(update, context, processing_msg, state)
-        elif query.data == "generate_audio_topics":
+        elif query.data == "generate_audio_topics" and isinstance(processing_msg, Message):
             await generate_audio_topics_for_user(update, context, processing_msg, state)
-        elif query.data == "generate_video":
+        elif query.data == "generate_video" and isinstance(processing_msg, Message):
             await generate_video_for_user(update, context, processing_msg, state)
 
     except Exception as e:
-        logger.error(f"Error en callback {query.data}: {str(e)}")
-        await processing_msg.edit_text(f"❌ Error generando archivo: {str(e)}")
+        logger.error(f"Error en callback {query.data or 'unknown'}: {str(e)}")
+        if isinstance(processing_msg, Message):
+            await processing_msg.edit_text(f"❌ Error generando archivo: {str(e)}")
 
 
 async def generate_pdf_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE, message: Message, state: UserState) -> None:
     """Genera PDF resumen para el usuario"""
+    if not update.effective_user:
+        return
+        
     await message.edit_text("🤖 Procesando con IA para dividir en temas...")
 
     try:
         if not state.organized_topics:
-            organized_topics = await divide_into_topics(state.extracted_text)
+            if not state.extracted_text:
+                await message.edit_text("❌ Error: No hay texto extraído del PDF")
+                return
+                
+            organized_topics = await divide_into_topics(state.extracted_text, state.work_directory)
 
             if "error" in organized_topics:
                 await message.edit_text(f"❌ Error al procesar con IA: {organized_topics['error']}")
@@ -373,11 +416,12 @@ async def generate_pdf_for_user(update: Update, context: ContextTypes.DEFAULT_TY
             state.organized_topics = organized_topics
 
         await message.edit_text("📄 Generando PDF resumen...")
-        title = f"Resumen de {state.filename}"
-        filename = f"resumen_{state.filename.replace('.pdf', '')}.pdf"
+        title = f"Resumen de {state.filename or 'archivo'}"
+        safe_filename = state.filename.replace('.pdf', '') if state.filename else 'archivo'
+        filename = f"resumen_{safe_filename}.pdf"
 
         pdf_path = generate_pdf_summary(
-            title, state.organized_topics["temas"], filename)
+            title, state.organized_topics["temas"], filename, state.work_directory)
 
         if pdf_path.startswith("Error"):
             await message.edit_text(f"❌ Error al generar PDF: {pdf_path}")
@@ -394,13 +438,14 @@ async def generate_pdf_for_user(update: Update, context: ContextTypes.DEFAULT_TY
             caption += f"📊 Total de temas: {len(state.organized_topics['temas'])}\n\n"
             caption += f"**Temas incluidos:**\n{topics_list}"
 
-            await context.bot.send_document(
-                chat_id=update.effective_user.id,
-                document=pdf_file,
-                filename=filename,
-                caption=caption,
-                parse_mode='Markdown'
-            )
+            if update.effective_user:
+                await context.bot.send_document(
+                    chat_id=update.effective_user.id,
+                    document=pdf_file,
+                    filename=filename,
+                    caption=caption,
+                    parse_mode='Markdown'
+                )
 
         await message.edit_text("✅ PDF enviado exitosamente!")
 
@@ -410,12 +455,19 @@ async def generate_pdf_for_user(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def generate_audio_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE, message: Message, state: UserState) -> None:
     """Genera audio resumen para el usuario"""
+    if not update.effective_user:
+        return
+        
     await message.edit_text("🤖 Procesando con IA para dividir en temas...")
 
     try:
         # Procesar con IA si no se ha hecho antes
         if not state.organized_topics:
-            organized_topics = await divide_into_topics(state.extracted_text)
+            if not state.extracted_text:
+                await message.edit_text("❌ Error: No hay texto extraído del PDF")
+                return
+                
+            organized_topics = await divide_into_topics(state.extracted_text, state.work_directory)
 
             if "error" in organized_topics:
                 await message.edit_text(f"❌ Error al procesar con IA: {organized_topics['error']}")
@@ -424,11 +476,12 @@ async def generate_audio_for_user(update: Update, context: ContextTypes.DEFAULT_
             state.organized_topics = organized_topics
 
         await message.edit_text("🎵 Generando audio resumen...")
-        title = f"Resumen de {state.filename}"
-        audio_filename = f"audio_resumen_{state.filename.replace('.pdf', '')}.mp3"
+        title = f"Resumen de {state.filename or 'archivo'}"
+        safe_filename = state.filename.replace('.pdf', '') if state.filename else 'archivo'
+        audio_filename = f"audio_resumen_{safe_filename}.mp3"
 
         audio_path = generate_audio_summary(
-            title, state.organized_topics["temas"], audio_filename)
+            title, state.organized_topics["temas"], audio_filename, state.work_directory)
 
         if audio_path.startswith("Error"):
             await message.edit_text(f"❌ Error al generar audio: {audio_path}")
@@ -448,28 +501,37 @@ async def generate_audio_for_user(update: Update, context: ContextTypes.DEFAULT_
             caption += f"📊 Total de temas: {len(state.organized_topics['temas'])}\n\n"
             caption += f"**Temas incluidos:**\n{topics_list}"
 
-            await context.bot.send_audio(
-                chat_id=update.effective_user.id,
-                audio=audio_file,
-                filename=audio_filename,
-                caption=caption,
-                parse_mode='Markdown'
-            )
+            if update.effective_user:
+                await context.bot.send_audio(
+                    chat_id=update.effective_user.id,
+                    audio=audio_file,
+                    filename=audio_filename,
+                    caption=caption,
+                    parse_mode='Markdown'
+                )
 
         await message.edit_text("✅ Audio enviado exitosamente!")
 
     except Exception as e:
         await message.edit_text(f"❌ Error al generar audio: {str(e)}")
+        # En caso de error, mantener el bloqueo para depuración
 
 
 async def generate_audio_topics_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE, message: Message, state: UserState) -> None:
     """Genera audios por tema para el usuario"""
+    if not update.effective_user:
+        return
+        
     await message.edit_text("🤖 Procesando con IA para dividir en temas...")
 
     try:
         # Procesar con IA si no se ha hecho antes
         if not state.organized_topics:
-            organized_topics = await divide_into_topics(state.extracted_text)
+            if not state.extracted_text:
+                await message.edit_text("❌ Error: No hay texto extraído del PDF")
+                return
+                
+            organized_topics = await divide_into_topics(state.extracted_text, state.work_directory)
 
             if "error" in organized_topics:
                 await message.edit_text(f"❌ Error al procesar con IA: {organized_topics['error']}")
@@ -478,10 +540,11 @@ async def generate_audio_topics_for_user(update: Update, context: ContextTypes.D
             state.organized_topics = organized_topics
 
         await message.edit_text("🎵 Generando audios por tema...")
-        base_filename = f"audio_tema_{state.filename.replace('.pdf', '')}"
+        safe_filename = state.filename.replace('.pdf', '') if state.filename else 'archivo'
+        base_filename = f"audio_tema_{safe_filename}"
 
         audio_files = generate_audio_by_topic(
-            state.organized_topics["temas"], base_filename)
+            state.organized_topics["temas"], base_filename, state.work_directory)
 
         if "error" in audio_files[0]:
             await message.edit_text(f"❌ Error al generar audios: {audio_files[0]['error']}")
@@ -496,14 +559,15 @@ async def generate_audio_topics_for_user(update: Update, context: ContextTypes.D
                         # Escapar caracteres especiales en el tema
                         safe_tema = escape_markdown(audio_file['tema'])
 
-                        await context.bot.send_audio(
-                            chat_id=update.effective_user.id,
-                            audio=audio,
-                            filename=os.path.basename(
-                                audio_file['archivo_audio']),
-                            caption=f"🎵 {safe_tema}\n⏱️ Duración: {audio_file['duración_estimada']}",
-                            parse_mode='Markdown'
-                        )
+                        if update.effective_user:
+                            await context.bot.send_audio(
+                                chat_id=update.effective_user.id,
+                                audio=audio,
+                                filename=os.path.basename(
+                                    audio_file['archivo_audio']),
+                                caption=f"🎵 {safe_tema}\n⏱️ Duración: {audio_file['duración_estimada']}",
+                                parse_mode='Markdown'
+                            )
                     successful_files += 1
                 except Exception as e:
                     logger.error(
@@ -526,12 +590,19 @@ async def generate_audio_topics_for_user(update: Update, context: ContextTypes.D
 
 async def generate_video_for_user(update: Update, context: ContextTypes.DEFAULT_TYPE, message: Message, state: UserState) -> None:
     """Genera video completo para el usuario"""
+    if not update.effective_user:
+        return
+        
     await message.edit_text("🤖 Procesando con IA para dividir en temas...")
 
     try:
         # Procesar con IA si no se ha hecho antes
         if not state.organized_topics:
-            organized_topics = await divide_into_topics(state.extracted_text)
+            if not state.extracted_text:
+                await message.edit_text("❌ Error: No hay texto extraído del PDF")
+                return
+                
+            organized_topics = await divide_into_topics(state.extracted_text, state.work_directory)
 
             if "error" in organized_topics:
                 await message.edit_text(f"❌ Error al procesar con IA: {organized_topics['error']}")
@@ -541,10 +612,11 @@ async def generate_video_for_user(update: Update, context: ContextTypes.DEFAULT_
 
         # Primero generar audios por tema
         await message.edit_text("🎵 Generando el audio para el video...")
-        base_filename = f"video_tema_{state.filename.replace('.pdf', '')}"
+        safe_filename = state.filename.replace('.pdf', '') if state.filename else 'archivo'
+        base_filename = f"video_tema_{safe_filename}"
 
         audio_files = generate_audio_by_topic(
-            state.organized_topics["temas"], base_filename)
+            state.organized_topics["temas"], base_filename, state.work_directory)
 
         if "error" in audio_files[0]:
             await message.edit_text(f"❌ Error al generar audios: {audio_files[0]['error']}")
@@ -566,7 +638,7 @@ async def generate_video_for_user(update: Update, context: ContextTypes.DEFAULT_
                 logger.error(f"Error actualizando progreso: {str(e)}")
 
         video_path = generate_complete_video(
-            state.organized_topics["temas"], base_filename, send_percentage)
+            state.organized_topics["temas"], base_filename, send_percentage, state.work_directory)
 
         if video_path.startswith("Error"):
             await message.edit_text(f"❌ Error al generar video: {video_path}")
@@ -588,13 +660,14 @@ async def generate_video_for_user(update: Update, context: ContextTypes.DEFAULT_
             caption += f"📊 Total de temas: {len(state.organized_topics['temas'])}\n\n"
             caption += f"**Temas incluidos:**\n{topics_list}"
 
-            await context.bot.send_video(
-                chat_id=update.effective_user.id,
-                video=video_file,
-                filename=video_filename,
-                caption=caption,
-                parse_mode='Markdown'
-            )
+            if update.effective_user:
+                await context.bot.send_video(
+                    chat_id=update.effective_user.id,
+                    video=video_file,
+                    filename=video_filename,
+                    caption=caption,
+                    parse_mode='Markdown'
+                )
 
         await message.edit_text("✅ Video enviado exitosamente!")
 
@@ -604,6 +677,9 @@ async def generate_video_for_user(update: Update, context: ContextTypes.DEFAULT_
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Maneja mensajes de texto"""
+    if not update.message:
+        return
+        
     await update.message.reply_text(
         "🤖 Envía un archivo PDF para comenzar a procesar.\n\n"
         "Usa /help para ver más información sobre las funcionalidades disponibles."
